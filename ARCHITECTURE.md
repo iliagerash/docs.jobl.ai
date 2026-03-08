@@ -3,7 +3,7 @@
 ## 1) Goals and Constraints
 
 - Keep the existing PHP scraping system intact and high-throughput.
-- Avoid any scraper-host write-path changes for AI ingestion.
+- Keep scraper logic intact; only add AI export marker writes to existing `export` table.
 - Provide hourly-or-better freshness to the AI application pipeline.
 - Centralize AI-side search, enrichment, and orchestration on Python + Postgres.
 - Minimize cross-host coupling and operational risk.
@@ -18,12 +18,12 @@ Naming:
 
 This architecture combines the strongest choices from prior options:
 
-1. **No scraper-host changes for AI ingestion**:
+1. **Minimal scraper-host changes for AI ingestion**:
    - Existing filtered writes to per-country operational MySQL remain unchanged.
-   - AI pipeline reads from existing country operational DBs only.
+   - AI pipeline reads from existing country operational DBs and marks processed jobs in `export` (`destination='jobl.ai'`).
 
 2. **Pull-based sync to AI Host** (hourly):
-   - AI Host Python sync worker pulls from each scraper country DB using read-only accounts.
+   - AI Host Python sync worker pulls from each scraper country DB and writes export markers to `export` (`destination='jobl.ai'`).
    - Sync is idempotent and tracks a high-watermark checkpoint to avoid duplicates.
 
 3. **AI source of truth = Postgres + pgvector**:
@@ -72,7 +72,7 @@ To remove ambiguity from the three candidate proposals, these choices are **fina
   1. **Operational country DBs** (existing, ingestion source)
      - Filtered jobs.
      - Existing retention policy remains as-is.
-     - AI Host reads new/updated rows hourly via read-only access.
+     - AI Host reads new/updated rows hourly and writes export markers for processed jobs.
 
 ---
 
@@ -226,7 +226,9 @@ Retention:
 
 ## 6) Security and Reliability
 
-- Cross-host access is **DB pull only** from AI Host using read-only MySQL users (per country DB).
+- Cross-host access is **DB read + limited write** from AI Host:
+  - read jobs from country DBs
+  - write processed markers into `export` with `destination='jobl.ai'`
 - IP allowlisting + TLS for DB connection.
 - Idempotent sync with retries and dead-letter/error logging.
 - No cross-host RabbitMQ dependency.
@@ -259,7 +261,7 @@ Retention:
 ## 7) Why this architecture fits Jobl AI
 
 - **Low migration risk**: PHP/RabbitMQ pipeline remains essentially unchanged.
-- **Low scraper overhead**: no additional writes or schemas on scraper host.
+- **Low scraper overhead**: no new schemas required on scraper host; only marker writes to existing `export` table.
 - **Operational simplicity**: pull-based sync avoids queue/firewall complexity.
 - **AI readiness**: Postgres+pgvector unifies transactional + semantic retrieval.
 - **Frontend flexibility**: same API contracts support Next.js web now and React Native later.

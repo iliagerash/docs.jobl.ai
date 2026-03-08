@@ -15,7 +15,7 @@ Goals:
 ## 2) Delivery Phases
 
 ## Phase 1 (Foundation)
-- No-change scraper integration (read-only access to country DBs)
+- Minimal-change scraper integration (read jobs + write export markers in country DBs)
 - AI sync pipeline + canonical Postgres schema
 - Core API skeleton + auth baseline
 
@@ -41,12 +41,13 @@ Goals:
 
 ## Epic A: Ingestion and Storage
 
-### A1. Configure country DB read access
-- Description: provision read-only access from AI host to each scraper country DB.
+### A1. Configure country DB integration access
+- Description: provision AI host access to read jobs and write `export` markers (`destination='jobl.ai'`) in each scraper country DB.
 - Dependencies: none.
 - Acceptance criteria:
-  - AI host can read required tables for each country DB.
-  - Access scope is read-only and audited.
+  - AI host can read required job tables for each country DB.
+  - AI host can insert/upsert rows in `export` table for `destination='jobl.ai'` only.
+  - Access scope is least-privilege and audited.
   - Country-to-source mapping is documented and tested.
 
 ### A2. Provision AI Postgres schema
