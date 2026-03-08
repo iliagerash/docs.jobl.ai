@@ -7,7 +7,7 @@ Documentation repository for the Jobl AI platform.
 The project is split into three repositories:
 
 - [`api.jobl.ai`](https://github.com/iliagerash/api.jobl.ai): Python backend (FastAPI + Mini-LLM).
-- [`jobl.ai`](https://github.com/iliagerash/jobl.ai): Astro frontend.
+- [`jobl.ai`](https://github.com/iliagerash/jobl.ai): React frontend.
 - [`docs.jobl.ai`](https://github.com/iliagerash/docs.jobl.ai): central documentation, architecture, and planning.
 
 ## What this repo contains
