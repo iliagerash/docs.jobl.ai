@@ -14,6 +14,19 @@ The project is split into three repositories:
 
 - [Architecture](./ARCHITECTURE.md): system architecture for ingestion, storage, AI processing, API boundaries, and frontend/mobile integration.
 - [Implementation Plan](./IMPLEMENTATION_PLAN.md): roadmap with epics, ticket-level tasks, dependencies, and acceptance criteria.
+- [API Repo Docs](./api/README.md): centralized docs moved from `api.jobl.ai`.
+
+## API documentation map
+
+The following docs were moved from `api.jobl.ai` into this repository:
+
+- [api/README.md](./api/README.md)
+- [api/libs/common/README.md](./api/libs/common/README.md)
+- [api/services/sync/README.md](./api/services/sync/README.md)
+- [api/services/inference/README.md](./api/services/inference/README.md)
+- [api/services/normalize/README.md](./api/services/normalize/README.md)
+- [api/services/training/README.md](./api/services/training/README.md)
+- [api/services/training/MODEL_SELECTION.md](./api/services/training/MODEL_SELECTION.md)
 
 ## Product direction (summary)
 
