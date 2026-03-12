@@ -1,20 +1,48 @@
 # Job Normalize Service (`services/normalize`)
 
-Worker service that fills:
-- `jobs.title_normalized`
-- `jobs.description_clean`
-- `jobs.description_html`
+Normalization service now focuses on sample extraction and sample processing.
 
-The command runs once and exits (cron-friendly).
+## Commands
 
-Current API-safe normalization rules:
-- removes trailing work-mode markers in titles (`remote`, `hybrid`, `on-site`, `% remote`, `remote position`)
-- removes obvious non-title title noise aligned with Google for Jobs guidance (hiring spam terms, job/ref codes, salary/date fragments, likely company/address suffixes)
-- removes trailing location parts from titles using context columns (`city_title`, `region_title`, `country_code`) and `countries.name`
-- also uses `countries.alternate_names` (`text[]`) for country aliases like `UK`, `Great Britain`
-- preserves legal title markers like `(m/w/d)` and `(m/f/d)` for frontend/API use
-- keeps useful location text when mode markers appear in trailing parentheses
-- cleans HTML descriptions into readable text with list bullets and paragraph breaks
+- `jobl-normalize-extract-samples`
+  - Extracts rows from `jobs` into `normalization_samples`.
+  - Current extractor rules:
+    - countries: `US, CA, GB, AU, NZ, SG`
+    - languages: `en, fr`
+    - random selection (`ORDER BY RANDOM()`)
+    - per-country balancing
+    - around `95%` rows with `@` in description and `5%` without
+  - CLI:
+    - `--limit`
+
+- `jobl-normalize-process-emails`
+  - Rule-based email extraction and masking from `normalization_samples.description`.
+  - Handles plain emails and `mailto:` variants (including HTML anchor forms).
+  - Replaces every detected email occurrence with `***email_hidden***`.
+  - Stores extracted emails in `normalization_samples.email`.
+  - Does not update `jobs`; this step is scoped to `normalization_samples` only.
+
+- `jobl-normalize-process-titles`
+  - LLM title normalization over `normalization_samples` using OpenAI Flex processing.
+  - Sends both `title` and `description` as context for title decisions.
+  - Sends `company_name` too, so company names can be stripped from normalized titles.
+  - Strips HTML tags from description before sending to OpenAI to reduce prompt size.
+  - Writes title labels to `normalization_samples.expected_title_normalized`.
+
+## Schema Notes
+
+- `jobs`
+  - uses `title` (raw source title)
+  - uses `title_clean` (cleaned title)
+  - has new `email` column
+  - no `description_html`
+
+- `normalization_samples`
+  - has `company_name` (used as title normalization context)
+  - has `email` (processed/extracted emails)
+  - uses `title` (renamed from `title_raw`)
+  - uses `description` (renamed from `description_raw`)
+  - removed description expected/generated/match columns
 
 ## Run locally
 
@@ -25,65 +53,24 @@ source .venv/bin/activate
 pip install -U pip
 pip install -e .
 cp .env.example .env
-jobl-normalize
 ```
 
-## Useful flags
+## Extract samples
 
 ```bash
-jobl-normalize --batch-size=2000
-jobl-normalize --max-batches=10
-jobl-normalize --from-id=500000
+jobl-normalize-extract-samples --limit=5000
 ```
 
-## Build language-proportional samples for evaluation
-
-After running migrations, build samples directly from `jobs`.
-
-Generate a language-balanced sample (default total: `50000`):
+## Process emails (rule-based)
 
 ```bash
-cd /home/<user>/Jobl/api.jobl.ai/services/normalize
-source .venv/bin/activate
-jobl-normalize-sample
+jobl-normalize-process-emails
+jobl-normalize-process-emails --limit=5000
+jobl-normalize-process-emails --batch-tag=extract_samples_YYYYMMDD_HHMMSS
+jobl-normalize-process-emails --random
 ```
 
-Generate a custom total and replace existing samples:
-
-```bash
-jobl-normalize-sample --total=15000 --replace
-```
-
-Notes:
-- `--batch-tag` is no longer a CLI option; the script generates one automatically.
-- sampling is driven by target language proportions across:
-  `en, es, de, fr, pt, it, gr, nl, da, uk`
-- rows with `jobs.language_code IS NULL` are skipped
-
-## Run evaluation on samples
-
-Fill generated columns and match flags in `normalization_samples`:
-
-```bash
-jobl-normalize-eval --batch-tag=eval_v1 --only-pending
-```
-
-Evaluate only a subset:
-
-```bash
-jobl-normalize-eval --batch-tag=eval_v1 --limit=500
-```
-
-## Label Samples With LLM (Raw Input, No Rules)
-
-Use this flow when you want labels from raw unprocessed data.
-`jobl-normalize-llm-label` sends `title_raw` and `description_raw` directly to OpenAI and writes outputs to:
-- `expected_title_normalized`
-- `expected_description_html`
-
-Implementation notes:
-- strict structured output (`json_schema`) is enforced
-- categorization is intentionally omitted from this pipeline
+## Process titles (LLM)
 
 Configure `.env`:
 
@@ -97,60 +84,10 @@ OPENAI_BATCH_POLL_SECONDS=15
 LLM_PROMPT_VERSION="v1"
 ```
 
-Label next pending rows and set a processing tag (OpenAI Batch API is default):
+Run title processing:
 
 ```bash
-jobl-normalize-llm-label --batch-tag=train_v1_0001 --limit=1000
-```
-
-Randomly sample pending rows (useful for labeling new training batches):
-
-```bash
-jobl-normalize-llm-label --batch-tag=train_v1_0002 --limit=2000 --random
-```
-
-Resume polling/apply for an already submitted OpenAI batch:
-
-```bash
-jobl-normalize-llm-label --batch-id=batch_xxx --batch-tag=train_v1_0001
-```
-
-Disable batch mode and run one-by-one requests:
-
-```bash
-jobl-normalize-llm-label --batch-tag=train_v1_0001 --limit=200 --no-batch
-```
-
-Debug direct mode (full prompt + full raw response):
-
-```bash
-jobl-normalize-llm-label --batch-tag=train_v1_debug --limit=20 --no-batch --debug
-```
-
-Notes:
-- `--batch-tag` now writes/overwrites `normalization_samples.batch_tag` for processed rows.
-- selection is driven by `--limit` over unprocessed rows only (not by existing batch tag).
-- `--batch-id` resumes a previously submitted batch and applies its output to matching `normalization_samples.id` rows.
-
-## ML-only title normalization
-
-For model training prep, use ML-only title cleanup that strips legal/gender markers like `(m/w/d)`.
-
-Important:
-- `jobl-normalize` (main worker) is unchanged and remains API/frontend-safe.
-- ML cleanup is isolated and should be used only for training datasets.
-
-Normalize one title:
-
-```bash
-jobl-normalize-ml-title --text="Senior Accountant (m/f/d) - Berlin"
-```
-
-Normalize titles in a CSV and append `title_ml` column:
-
-```bash
-jobl-normalize-ml-title \
-  --input-csv=/home/<user>/Downloads/normalization_samples.csv \
-  --output-csv=/home/<user>/Downloads/normalization_samples_ml.csv \
-  --title-column=title_raw
+jobl-normalize-process-titles --batch-tag=train_v1_0001 --limit=1000
+jobl-normalize-process-titles --batch-tag=train_v1_0001 --limit=1000 --service-tier=flex
+jobl-normalize-process-titles --batch-tag=train_v1_debug --limit=20 --debug
 ```
