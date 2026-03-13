@@ -29,8 +29,9 @@ Purpose:
 
 Selection logic:
 - `title_raw` must be non-empty.
+- `description_raw` must be non-empty.
 - `expected_title_normalized` must be non-empty.
-- `language_code` must be one of: `en, es, de, fr, pt, it, gr, uk, nl, da`.
+- `language_code` must be one of: `en, fr`.
 - Optional: filter by one `batch_tag`.
 
 Arguments:
@@ -40,7 +41,7 @@ Arguments:
 
 Output row fields:
 - `id`, `language_code`, `country_code`, `country_name`, `region_title`, `city_title`
-- `title_raw`
+- `title_raw`, `description_raw`, `company_name`
 - `expected_title_normalized`
 
 Example:
@@ -74,7 +75,7 @@ Purpose:
 
 Behavior:
 - `system`: title normalization prompt.
-- `user`: JSON payload with raw title and location context.
+- `user`: JSON payload with raw title, full raw description, company name, and location context.
 - `assistant`: JSON payload with expected `title_normalized`.
 
 Arguments:
@@ -151,7 +152,7 @@ Metrics:
 Outputs:
 - `summary.json`
 - `mismatches.jsonl`
-- `mismatches.csv`
+- `mismatches.csv` with columns: `title_original,title_expected,title_generated`
 
 Example:
 
