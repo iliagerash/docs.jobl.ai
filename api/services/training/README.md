@@ -1,6 +1,6 @@
 # Job Training Service (`services/training`)
 
-Utilities to prepare labeled normalization data and run LoRA fine-tuning for **title normalization only**.
+Utilities to prepare labeled normalization data and run FLAN-T5 seq2seq fine-tuning for **title normalization only**.
 
 ## Install
 
@@ -28,8 +28,7 @@ Purpose:
 - Produces the raw supervised dataset in JSONL.
 
 Selection logic:
-- `title_raw` must be non-empty.
-- `description_raw` must be non-empty.
+- `title` must be non-empty.
 - `expected_title_normalized` must be non-empty.
 - `language_code` must be one of: `en, fr`.
 - Optional: filter by one `batch_tag`.
@@ -40,9 +39,7 @@ Arguments:
 - `--batch-tag`: optional batch filter.
 
 Output row fields:
-- `id`, `language_code`, `country_code`, `country_name`, `region_title`, `city_title`
-- `title_raw`, `description_raw`, `company_name`
-- `expected_title_normalized`
+- `id`, `language_code`, `title`, `expected_title_normalized`
 
 Example:
 
@@ -70,19 +67,19 @@ Outputs:
 ### `jobl-training-build-jsonl`
 
 Purpose:
-- Converts split rows into instruction-format JSONL for SFT.
-- Builds `messages` in `system/user/assistant` format.
+- Converts split rows into seq2seq JSONL.
+- Builds flat `input` and `target` text fields.
 
 Behavior:
-- `system`: title normalization prompt.
-- `user`: JSON payload with raw title, full raw description, company name, and location context.
-- `assistant`: JSON payload with expected `title_normalized`.
+- Input format: `normalize job title: <pre_stripped_title>`
+- Target format: `<expected_title_normalized>`
+- Applies deterministic `pre_strip` cleanup to raw titles before model input creation.
 
 Arguments:
 - `--split`: one of `train|val|test`, default `train`.
 - `--in`: split JSONL path, default `data/splits/<split>.jsonl`.
-- `--out`: instruction JSONL path, default `data/sft/<split>.jsonl`.
-- `--prompt-version`: stored in user payload, default `v1`.
+- `--out`: seq2seq JSONL path, default `data/sft/<split>.jsonl`.
+- `--coverage-check`: enabled by default; on `train` split logs warning for low pattern coverage.
 
 Example:
 
@@ -92,58 +89,57 @@ jobl-training-build-jsonl --split=val
 jobl-training-build-jsonl --split=test
 ```
 
-### `jobl-training-train-lora`
+### `jobl-training-train-seq2seq`
 
 Purpose:
-- Runs LoRA SFT training on instruction JSONL.
-- Saves adapter checkpoint for local inference/evaluation.
+- Runs seq2seq fine-tuning on `input`/`target` JSONL.
+- Saves best model + tokenizer for local inference/evaluation.
 
 Defaults:
-- Base model: `microsoft/Phi-3-mini-4k-instruct`
+- Base model: `google/flan-t5-large`
 - Train/val JSONL: `data/sft/train.jsonl` and `data/sft/val.jsonl`
+- Output dir: `artifacts/flan-t5-normalize-v1`
 
 Arguments:
-- `--train-jsonl`, `--val-jsonl`: instruction datasets.
+- `--train-jsonl`, `--val-jsonl`: seq2seq datasets.
 - `--model`: HF base model id.
 - `--out-dir`: training output directory.
-- `--epochs`, `--batch-size`, `--grad-accum`, `--lr`, `--max-seq-len`: training hyperparameters.
+- `--epochs`, `--batch-size`, `--lr`: training hyperparameters.
 - `--memory-safe`: CPU-safe profile for low-memory hosts.
 
 Outputs:
 - Trainer checkpoints under `--out-dir`.
-- Final adapter in `--out-dir/adapter`.
+- Best model in `--out-dir/best`.
 
 Example:
 
 ```bash
-jobl-training-train-lora
-jobl-training-train-lora --memory-safe
-jobl-training-train-lora \
+jobl-training-train-seq2seq
+jobl-training-train-seq2seq --memory-safe
+jobl-training-train-seq2seq \
   --train-jsonl=data/sft/train.jsonl \
   --val-jsonl=data/sft/val.jsonl \
-  --model=microsoft/Phi-3-mini-4k-instruct \
-  --out-dir=artifacts/lora-normalize-v1
+  --model=google/flan-t5-large \
+  --out-dir=artifacts/flan-t5-normalize-v1
 ```
 
-### `jobl-training-eval-lora`
+### `jobl-training-eval-seq2seq`
 
 Purpose:
-- Evaluates a trained LoRA adapter on `data/sft/test.jsonl`.
+- Evaluates a trained seq2seq model on `data/sft/test.jsonl`.
 - Computes title quality metrics and exports mismatches for manual review.
 
 Arguments:
-- `--test-jsonl`: test instruction JSONL path (default `data/sft/test.jsonl`).
-- `--model`: optional base model id override.
-- `--adapter-dir`: adapter directory (default `artifacts/lora-normalize-v1/adapter`).
+- `--test-jsonl`: test seq2seq JSONL path (default `data/sft/test.jsonl`).
+- `--model-dir`: model directory (default `artifacts/flan-t5-normalize-v1/best`).
 - `--limit`: optional max rows to evaluate, `0` means all.
 - `--batch-size`: inference batch size (default `8`).
-- `--max-new-tokens`, `--temperature`: inference params.
 - `--changed-titles-only`: default enabled; use `--all-titles` to include unchanged rows.
 - `--progress-every`: progress log interval in rows (default `10`).
 - `--out-dir`: output artifacts directory.
 
 Metrics:
-- `valid_json_rate`
+- `valid_json_rate` (`null` for seq2seq plain-text output; key kept for compatibility)
 - `title_exact_rate`
 - `title_non_empty_rate`
 - `title_similarity_avg`
@@ -157,9 +153,9 @@ Outputs:
 Example:
 
 ```bash
-jobl-training-eval-lora
-jobl-training-eval-lora --all-titles
-jobl-training-eval-lora --limit=100 --out-dir=artifacts/lora-normalize-v1/eval_smoke
+jobl-training-eval-seq2seq
+jobl-training-eval-seq2seq --all-titles
+jobl-training-eval-seq2seq --limit=100 --out-dir=artifacts/flan-t5-normalize-v1/eval_smoke
 ```
 
 ## End-to-end quick run
@@ -170,6 +166,6 @@ jobl-training-split --in=data/raw/labeled.jsonl --out-dir=data/splits
 jobl-training-build-jsonl --in=data/splits/train.jsonl --out=data/sft/train.jsonl
 jobl-training-build-jsonl --in=data/splits/val.jsonl --out=data/sft/val.jsonl
 jobl-training-build-jsonl --in=data/splits/test.jsonl --out=data/sft/test.jsonl
-jobl-training-train-lora --memory-safe
-jobl-training-eval-lora --limit=100
+jobl-training-train-seq2seq --memory-safe
+jobl-training-eval-seq2seq --limit=100
 ```
