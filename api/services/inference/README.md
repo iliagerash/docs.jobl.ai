@@ -1,46 +1,43 @@
-# Job Inference Service (`services/inference`)
+# jobl-inference
 
-Latency-focused local inference benchmark for normalization models.
+`jobl-inference` is a CPU-oriented FastAPI service that loads a fine-tuned `google/flan-t5-large` seq2seq model and exposes HTTP endpoints to normalize raw job titles into canonical titles for downstream systems.
 
-## Install
+## Environment Variables
+
+| Variable | Required | Default | Description |
+| --- | --- | --- | --- |
+| `MODEL_DIR` | Yes | None | Path to the fine-tuned model directory to load at startup. |
+| `NUM_BEAMS` | No | `4` | Beam width used during generation. |
+| `MAX_NEW_TOKENS` | No | `32` | Maximum generated token count per prediction. |
+| `BATCH_SIZE_LIMIT` | No | `64` | Maximum number of items accepted by `POST /normalize/batch`. |
+| `WORKERS` | No | `1` | Number of uvicorn worker processes used by `jobl-inference`. |
+| `LOG_LEVEL` | No | `INFO` | Service log level (for app + uvicorn startup). |
+
+## Install and Run
 
 ```bash
-cd /home/<user>/Jobl/api.jobl.ai/services/inference
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -U pip
 pip install -e .
-cp .env.example .env
+MODEL_DIR=./artifacts/flan-t5-normalize-v1/best jobl-inference
+MODEL_DIR=./artifacts/flan-t5-normalize-v1/best jobl-inference --workers=4
+MODEL_DIR=./artifacts/flan-t5-normalize-v1/best WORKERS=4 jobl-inference
 ```
 
-## Benchmark inference speed
+## Example Requests
 
-Defaults assume artifacts from `services/training`:
-- input: `../training/data/sft/test.jsonl`
-- adapter: `../training/artifacts/lora-normalize-v1/adapter`
-- base model is auto-detected from adapter metadata
-
-Run full normalization benchmark (title + description):
+Single title normalization:
 
 ```bash
-jobl-infer-benchmark --task=full --limit=30 --warmup=2 --progress-every=1
+curl -sS http://localhost:8000/normalize \
+  -H "Content-Type: application/json" \
+  -d '{"title_raw":"Senior SWE - Full Time"}'
 ```
 
-Run title-only benchmark (production-fast path estimate):
+Batch title normalization:
 
 ```bash
-jobl-infer-benchmark --task=title --limit=50 --warmup=3 --progress-every=1
+curl -sS http://localhost:8000/normalize/batch \
+  -H "Content-Type: application/json" \
+  -d '{"items":[{"title_raw":"RN Permanent Reliever"},{"title_raw":"Lab Technician (PERM)"}]}'
 ```
 
-Optional flags:
-- `--max-new-tokens=...` (default: `512` for `full`, `64` for `title`)
-- `--temperature=0`
-- `--model=...` to override auto-detected base model
-- `--out=artifacts/benchmark_summary.json`
-
-## Output
-
-Writes a JSON summary file with:
-- latency stats: `min`, `p50`, `p95`, `max`, `avg`
-- throughput: `rows_per_sec`, `output_tokens_per_sec`, `avg_output_tokens_per_row`
-- model/adapter/task/settings used for the benchmark
+`MODEL_DIR` is required. If it is missing or invalid, the service will fail during startup and refuse to run.
